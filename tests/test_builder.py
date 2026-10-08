@@ -89,18 +89,18 @@ def _make_cursor(renderer_cls, recorder: _Recorder):
         def description(self):
             return recorder.description
 
-        def _execute(self, sql, params):
+        def _just_execute(self, sql, params):
             recorder.calls.append((sql, list(params)))
 
-        def _execute_and_fetch(self, sql, params):
+        def _just_execute_and_fetch(self, sql, params):
             recorder.calls.append((sql, list(params)))
             return list(recorder.rows)
 
-        def _execute_and_fetch_one(self, sql, params):
+        def _just_execute_and_fetch_one(self, sql, params):
             recorder.calls.append((sql, list(params)))
             return recorder.rows[0] if recorder.rows else None
 
-        def _execute_many(self, sql, param_sets):
+        def _just_execute_many(self, sql, param_sets):
             for params in param_sets:
                 recorder.calls.append((sql, list(params)))
 

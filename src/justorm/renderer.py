@@ -54,6 +54,24 @@ class JustRenderABS:
     #: and passes parameters as a dict.
     uses_named_placeholders: bool = False
 
+    #: Whether the dialect prefers ``SELECT TOP n`` over
+    #: ``OFFSET 0 ROWS FETCH NEXT n ROWS ONLY`` when only a limit is
+    #: given (no offset).
+    #:
+    #: SQL Server supports ``OFFSET ... FETCH`` since 2012, but it
+    #: requires an ``ORDER BY`` clause.  A bare ``SELECT ... LIMIT n``
+    #: (i.e. ``OFFSET 0 ROWS FETCH NEXT n ROWS ONLY`` with no
+    #: ordering) is rejected.  ``SELECT TOP n`` has no such
+    #: requirement, so it is what justorm emits on SQL Server when
+    #: there is a limit but no offset.
+    limit_without_offset_uses_top: bool = False
+    
+    #: Whether the dialect accepts ``AS`` before a table or subquery
+    #: alias.  Oracle does not: ``FROM t AS x`` is a syntax error,
+    #: it must be ``FROM t x``.  Column aliases still use ``AS``
+    #: everywhere.
+    table_alias_uses_as: bool = True
+
     # ------------------------------------------------------------------
     # Identifiers
     # ------------------------------------------------------------------
@@ -127,6 +145,14 @@ class JustRenderABS:
         if offset is not None:
             parts.append(f"OFFSET {int(offset)}")
         return " ".join(parts)
+
+    def render_limit_top(self, limit: int) -> str:
+        """Render a ``TOP n`` clause placed right after ``SELECT``.
+
+        Only used when :attr:`limit_without_offset_uses_top` is True
+        and the query has a limit but no offset.
+        """
+        raise NotImplementedError
 
     def render_for_update(
         self,
@@ -457,26 +483,30 @@ class SQLiteRenderer(JustRenderABS):
 
 
 class MSSQLRenderer(JustRenderABS):
-    """Renderer for SQL Server, used with the PyMSSQL driver.
+    """Renderer for SQL Server, used with the pymssql driver.
 
     The driver-specific details justorm exposes:
 
     * identifiers are quoted with square brackets, SQL Server's native
       quoting style,
-    * ``%s`` is used for placeholders (PyMSSQL's own convention),
+    * ``%s`` is used for placeholders (pymssql's own convention),
     * ``RETURNING`` is not available; the equivalent is the ``OUTPUT``
       clause, which has a different shape and is best written as raw
       SQL,
     * upserts use ``MERGE``, which justorm does not model,
-    * ``LIMIT`` / ``OFFSET`` map to ``OFFSET ... ROWS FETCH NEXT ...
-      ROWS ONLY``, which requires an ``ORDER BY`` clause,
+    * ``LIMIT`` alone maps to ``SELECT TOP n`` (which needs no
+      ``ORDER BY``); ``OFFSET``, or a limit with an explicit offset,
+      maps to ``OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`` (which
+      requires an ``ORDER BY``),
     * ``FOR UPDATE`` is not a thing on SQL Server; row locking is done
       through table hints such as ``WITH (UPDLOCK)``,
-    * ``DISTINCT ON`` and ``ILIKE`` are not available.
+    * ``DISTINCT ON`` and ``ILIKE`` are not available,
+    * ``DEFAULT`` is accepted inside a ``VALUES`` list.
     """
 
     dialect_name = "pymssql"
     supports_values_default = True
+    limit_without_offset_uses_top = True
 
     def render_identifier(self, name: str) -> str:
         return "[" + name.replace("]", "]]") + "]"
@@ -539,11 +569,18 @@ class MSSQLRenderer(JustRenderABS):
         parts: list = []
         # SQL Server requires an ORDER BY for OFFSET/FETCH.  We always
         # emit OFFSET (with 0 if the caller did not provide one) so the
-        # statement is well-formed.
+        # statement is well-formed *when* an ORDER BY is present.  When
+        # there is a limit but no offset, the builder uses
+        # ``SELECT TOP n`` instead (see
+        # ``limit_without_offset_uses_top``), so this branch only runs
+        # when an offset is explicitly given.
         parts.append(f"OFFSET {int(offset) if offset is not None else 0} ROWS")
         if limit is not None:
             parts.append(f"FETCH NEXT {int(limit)} ROWS ONLY")
         return " ".join(parts)
+
+    def render_limit_top(self, limit: int) -> str:
+        return f"TOP {int(limit)}"
 
     def render_for_update(
         self,
@@ -601,6 +638,7 @@ class OracleRenderer(JustRenderABS):
     dialect_name = "oracledb"
     supports_values_default = False
     uses_named_placeholders = True
+    table_alias_uses_as = False
 
     def render_identifier(self, name: str) -> str:
         return '"' + name.replace('"', '""') + '"'

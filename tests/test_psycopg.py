@@ -1075,13 +1075,13 @@ class TestInstrumentation:
         seen = []
 
         class LoggingCursor(justorm.psycopg.Cursor):
-            def _execute(self, sql, params):
+            def _just_execute(self, sql, params):
                 seen.append((sql, list(params)))
-                super()._execute(sql, params)
+                super()._just_execute(sql, params)
 
-            def _execute_and_fetch(self, sql, params):
+            def _just_execute_and_fetch(self, sql, params):
                 seen.append((sql, list(params)))
-                return super()._execute_and_fetch(sql, params)
+                return super()._just_execute_and_fetch(sql, params)
 
         old_factory = pg_conn.cursor_factory
         pg_conn.cursor_factory = LoggingCursor

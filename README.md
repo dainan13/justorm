@@ -105,11 +105,6 @@ justorm` imports no driver at all.
 | `justorm.pymssql`  | [pymssql](https://pymssql.readthedocs.io/)                          | SQL Server      |
 | `justorm.oracledb` | [python-oracledb](https://python-oracledb.readthedocs.io/)          | Oracle          |
 
-> **Beta drivers.**  `pymssql` and `oracledb` ship with the full API
-> surface and pass the unit tests, but have **not** been
-> integration-tested against a live SQL Server or Oracle server.
-> Treat them as beta until you have verified them in your environment.
-
 ## A short tour
 
 ### SELECT
@@ -225,12 +220,10 @@ The test suite has two layers:
   and renderer against a fake cursor and do not need a database.
 - **Integration tests** (`tests/test_psycopg.py`,
   `tests/test_psycopg2.py`, `tests/test_pymysql.py`,
-  `tests/test_sqlite.py`) run against a real database.  They are
+  `tests/test_sqlite.py`, `tests/test_pymssql.py`,
+  `tests/test_oracledb.py`) run against a real database.  They are
   opt-in per driver and skip automatically when the driver or the
   server is not available.
-- **Smoke tests** (`tests/test_pymssql.py`, `tests/test_oracledb.py`)
-  verify the driver modules import cleanly and expose the expected
-  class hierarchy.  They do not open a connection.
 
 To run everything:
 
@@ -241,8 +234,14 @@ $ JUSTORM_PG_DSN="postgresql://user:pw@localhost/test" \
   pytest
 ```
 
-SQLite tests always run.  PostgreSQL and MySQL tests skip unless the
-corresponding DSN is set in the environment.
+SQLite tests always run.  Every other driver's tests skip unless the
+corresponding `JUSTORM_*_DSN` variable is set in the environment:
+
+- `JUSTORM_PG_DSN` — PostgreSQL for psycopg (v3)
+- `JUSTORM_PG2_DSN` — PostgreSQL for psycopg2
+- `JUSTORM_MYSQL_DSN` — MySQL / MariaDB
+- `JUSTORM_MSSQL_DSN` — SQL Server
+- `JUSTORM_ORACLE_DSN` — Oracle
 
 A convenience script, `run_tests.py`, runs the full pipeline (build
 the wheel, install it, run the tests) and writes a log file:

@@ -2,20 +2,27 @@
 
 The test suite is organised in two layers:
 
-* **Pure tests** (``test_builder.py``, ``test_renderer.py``) exercise the
-  builder and renderer without touching a database.  They use a tiny
-  in-memory recorder that pretends to be a cursor, so they run
-  everywhere.
+* **Pure tests** (``test_builder.py``, ``test_renderer.py``,
+  ``test_fetch.py``) exercise the builder and renderer without
+  touching a database.  They use a tiny in-memory recorder that
+  pretends to be a cursor, so they run everywhere.
 * **Integration tests** (``test_psycopg.py``, ``test_psycopg2.py``,
-  ``test_pymysql.py``, ``test_sqlite.py``) run against a real database.
-  They are opt-in per driver and skip automatically when the driver or
-  the server is not available.
+  ``test_pymysql.py``, ``test_sqlite.py``, ``test_pymssql.py``,
+  ``test_oracledb.py``) run against a real database.  They are
+  opt-in per driver and skip automatically when the driver or the
+  server is not available.
 
 Connection parameters are read from environment variables:
 
 * ``JUSTORM_PG_DSN``    — PostgreSQL DSN for psycopg (v3).
+                           Example: ``postgresql://user:pw@localhost/test``
 * ``JUSTORM_PG2_DSN``   — PostgreSQL DSN for psycopg2.
 * ``JUSTORM_MYSQL_DSN`` — MySQL DSN for PyMySQL.
+                           Example: ``mysql://user:pw@localhost/test``
+* ``JUSTORM_MSSQL_DSN`` — SQL Server DSN for pymssql.
+                           Example: ``mssql://user:pw@localhost/test``
+* ``JUSTORM_ORACLE_DSN`` — Oracle DSN for python-oracledb.
+                           Example: ``oracle://user:pw@localhost:1521/service``
 * ``JUSTORM_SQLITE_PATH`` — SQLite database file.  If unset,
                             ``:memory:`` is used.
 
@@ -28,13 +35,15 @@ connections here, once per fixture, so that individual tests can call
 
 * psycopg3 and psycopg2 accept a ``cursor_factory`` keyword on
   ``connect()``; the factory is called with the connection and must
-  return a cursor instance.  ``justorm.psycopg.Cursor`` and
-  ``justorm.psycopg2.Cursor`` satisfy that.
-* PyMySQL accepts the cursor class as the first positional argument to
-  ``Connection.cursor()``.  We set it per call, because PyMySQL's
-  ``connect()`` does not take a cursor factory.
-* SQLite is special: ``sqlite3.Cursor`` cannot be subclassed, so the
-  justorm wrapper is constructed directly from the connection.
+  return a cursor instance.
+* PyMySQL accepts the cursor class as the first positional argument
+  to ``Connection.cursor()``.
+* SQLite and pymssql are special: their cursor classes cannot be
+  plugged in through the connection, so the justorm wrapper is
+  constructed directly from the connection.
+* python-oracledb's ``Cursor`` can be subclassed, but
+  ``Connection.cursor()`` does not accept a replacement class;
+  the justorm cursor is constructed directly from the connection.
 """
 
 from __future__ import annotations
@@ -43,7 +52,7 @@ import importlib
 import os
 import sqlite3
 from typing import Iterator, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -63,6 +72,11 @@ def _try_import(module: str) -> Optional[object]:
 def _env(name: str) -> Optional[str]:
     value = os.environ.get(name)
     return value if value else None
+
+
+def _quote_mssql(name: str) -> str:
+    """Quote a SQL Server identifier with square brackets."""
+    return "[" + name.replace("]", "]]") + "]"
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +138,11 @@ def _drop_pg_schema(conn) -> None:
 
 @pytest.fixture()
 def pg_conn(psycopg_module: object, pg_dsn: str) -> Iterator[object]:
-    """A live psycopg (v3) connection with a scratch schema.
-
-    The connection is created with ``cursor_factory=justorm.psycopg.Cursor``
-    so that ``conn.cursor()`` returns a justorm cursor.
-    """
+    """A live psycopg (v3) connection with a scratch schema."""
     psycopg = psycopg_module
     import justorm.psycopg
 
-    conn = psycopg.connect(
-        pg_dsn, cursor_factory=justorm.psycopg.Cursor
-    )
+    conn = psycopg.connect(pg_dsn, cursor_factory=justorm.psycopg.Cursor)
     try:
         _reset_pg_schema(conn)
         yield conn
@@ -149,9 +157,7 @@ def pg_conn2(psycopg2_module: object, pg2_dsn: str) -> Iterator[object]:
     psycopg2 = psycopg2_module
     import justorm.psycopg2
 
-    conn = psycopg2.connect(
-        pg2_dsn, cursor_factory=justorm.psycopg2.Cursor
-    )
+    conn = psycopg2.connect(pg2_dsn, cursor_factory=justorm.psycopg2.Cursor)
     try:
         _reset_pg_schema(conn)
         yield conn
@@ -189,15 +195,15 @@ def _parse_mysql_dsn(dsn: str) -> dict:
         )
     kwargs: dict = {}
     if parts.hostname:
-        kwargs["host"] = parts.hostname
+        kwargs["host"] = unquote(parts.hostname)
     if parts.port:
         kwargs["port"] = parts.port
     if parts.username:
-        kwargs["user"] = parts.username
+        kwargs["user"] = unquote(parts.username)
     if parts.password:
-        kwargs["password"] = parts.password
+        kwargs["password"] = unquote(parts.password)
     if parts.path and parts.path != "/":
-        kwargs["database"] = parts.path.lstrip("/")
+        kwargs["database"] = unquote(parts.path.lstrip("/"))
     return kwargs
 
 
@@ -233,6 +239,230 @@ def mysql_conn(pymysql_module: object, mysql_dsn: str) -> Iterator[object]:
             conn.close()
         except Exception:  # pragma: no cover - best-effort cleanup
             pass
+
+
+# ---------------------------------------------------------------------------
+# SQL Server (pymssql)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def mssql_dsn() -> str:
+    dsn = _env("JUSTORM_MSSQL_DSN")
+    if dsn is None:
+        pytest.skip("JUSTORM_MSSQL_DSN is not set")
+    return dsn
+
+
+@pytest.fixture(scope="session")
+def pymssql_module() -> object:
+    module = _try_import("pymssql")
+    if module is None:
+        pytest.skip("pymssql is not installed")
+    return module
+
+
+def _parse_mssql_dsn(dsn: str) -> dict:
+    """Parse a ``mssql://user:pw@host:port/db`` DSN into pymssql kwargs."""
+    parts = urlparse(dsn)
+    if parts.scheme not in ("mssql", "sqlserver"):
+        raise ValueError(
+            f"unsupported MSSQL DSN scheme: {parts.scheme!r}"
+        )
+    kwargs: dict = {}
+    if parts.hostname:
+        kwargs["server"] = unquote(parts.hostname)
+    if parts.port:
+        kwargs["port"] = parts.port
+    if parts.username:
+        kwargs["user"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    if parts.path and parts.path != "/":
+        kwargs["database"] = unquote(parts.path.lstrip("/"))
+    return kwargs
+
+
+#: The schema the SQL Server tests create and drop per test.  It lives
+#: inside the database named in the DSN; schema and database are two
+#: separate layers in SQL Server, so the names can coincide.
+_MSSQL_SCHEMA = "justorm_test"
+
+
+def _mssql_tables(cur) -> list:
+    cur.execute(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+        f"WHERE TABLE_SCHEMA = '{_MSSQL_SCHEMA}'"
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def _reset_mssql_schema(conn) -> None:
+    """Drop and recreate the scratch schema.
+
+    SQL Server's ``DROP SCHEMA`` does not cascade, so every object
+    inside it has to be dropped first.  We drop tables one by one,
+    then the schema, then recreate it.
+    """
+    cur = conn.cursor()
+    try:
+        for name in _mssql_tables(cur):
+            cur.execute(
+                f"DROP TABLE [{_MSSQL_SCHEMA}].{_quote_mssql(name)}"
+            )
+        cur.execute(
+            f"""
+            IF SCHEMA_ID('{_MSSQL_SCHEMA}') IS NOT NULL
+                DROP SCHEMA [{_MSSQL_SCHEMA}]
+            """
+        )
+        cur.execute(f"CREATE SCHEMA [{_MSSQL_SCHEMA}]")
+    finally:
+        cur.close()
+
+
+def _drop_mssql_schema(conn) -> None:
+    """Best-effort cleanup of the scratch schema."""
+    try:
+        cur = conn.cursor()
+        try:
+            for name in _mssql_tables(cur):
+                cur.execute(
+                    f"DROP TABLE [{_MSSQL_SCHEMA}].{_quote_mssql(name)}"
+                )
+            cur.execute(
+                f"""
+                IF SCHEMA_ID('{_MSSQL_SCHEMA}') IS NOT NULL
+                    DROP SCHEMA [{_MSSQL_SCHEMA}]
+                """
+            )
+        finally:
+            cur.close()
+    except Exception:  # pragma: no cover - best-effort cleanup
+        pass
+
+
+@pytest.fixture()
+def mssql_conn(pymssql_module: object, mssql_dsn: str) -> Iterator[object]:
+    """A live pymssql connection with a scratch schema.
+
+    pymssql defaults to manual commit; we turn autocommit on so that
+    DDL and schema resets are visible to the rest of the session
+    without an explicit ``conn.commit()``.
+    """
+    pymssql = pymssql_module
+    kwargs = _parse_mssql_dsn(mssql_dsn)
+    conn = pymssql.connect(**kwargs)
+    conn.autocommit(True)
+    try:
+        _reset_mssql_schema(conn)
+        yield conn
+    finally:
+        _drop_mssql_schema(conn)
+        try:
+            conn.close()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Oracle (python-oracledb)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def oracle_dsn() -> str:
+    dsn = _env("JUSTORM_ORACLE_DSN")
+    if dsn is None:
+        pytest.skip("JUSTORM_ORACLE_DSN is not set")
+    return dsn
+
+
+@pytest.fixture(scope="session")
+def oracledb_module() -> object:
+    module = _try_import("oracledb")
+    if module is None:
+        pytest.skip("python-oracledb is not installed")
+    return module
+
+
+def _parse_oracle_dsn(dsn: str) -> dict:
+    """Parse an ``oracle://user:pw@host:port/service`` DSN.
+
+    python-oracledb wants the connect identifier as a single
+    ``host:port/service`` string in the ``dsn`` keyword, plus ``user``
+    and ``password`` separately.  The service name is the PDB (or SID)
+    at the end of the URL path.
+    """
+    parts = urlparse(dsn)
+    if parts.scheme != "oracle":
+        raise ValueError(
+            f"unsupported Oracle DSN scheme: {parts.scheme!r}"
+        )
+    kwargs: dict = {}
+    if parts.username:
+        kwargs["user"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    host = parts.hostname or "localhost"
+    port = parts.port or 1521
+    service = unquote(parts.path.lstrip("/")) if parts.path else ""
+    if not service:
+        raise ValueError("Oracle DSN is missing a service name")
+    kwargs["dsn"] = f"{host}:{port}/{service}"
+    return kwargs
+
+
+def _oracle_tables(conn) -> list:
+    """Return the names of every table owned by the current user."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT table_name FROM user_tables")
+        return [row[0] for row in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def _reset_oracle_schema(conn) -> None:
+    """Drop every table in the current user's schema.
+
+    Oracle treats the user as the schema; ``user_tables`` lists the
+    tables the connected user owns.  Table names come back upper-cased
+    (because Oracle folds unquoted identifiers), so we drop them with
+    their real, quoted names.
+    """
+    for name in _oracle_tables(conn):
+        cur = conn.cursor()
+        try:
+            cur.execute(f'DROP TABLE "{name}" CASCADE CONSTRAINTS')
+        finally:
+            cur.close()
+    conn.commit()
+
+
+@pytest.fixture()
+def oracle_conn(oracledb_module: object, oracle_dsn: str) -> Iterator[object]:
+    """A live python-oracledb connection with an empty schema.
+
+    The schema is the connected user's own schema (Oracle user ==
+    schema).  Every test starts with no tables; the fixture drops
+    everything at setup and again at teardown.
+    """
+    oracledb = oracledb_module
+    kwargs = _parse_oracle_dsn(oracle_dsn)
+    conn = oracledb.connect(**kwargs)
+    # Autocommit keeps DDL and DML visible immediately, since the tests
+    # do not manage transactions themselves.
+    conn.autocommit = True
+    try:
+        _reset_oracle_schema(conn)
+        yield conn
+    finally:
+        try:
+            _reset_oracle_schema(conn)
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

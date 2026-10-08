@@ -604,6 +604,23 @@ class TestSupportsValuesDefault:
         assert oracle.supports_values_default is False
 
 
+
+class TestTableAliasUsesAs:
+    def test_pg(self, pg):
+        assert pg.table_alias_uses_as is True
+
+    def test_mysql(self, mysql):
+        assert mysql.table_alias_uses_as is True
+
+    def test_sqlite(self, sqlite):
+        assert sqlite.table_alias_uses_as is True
+
+    def test_mssql(self, mssql):
+        assert mssql.table_alias_uses_as is True
+
+    def test_oracle(self, oracle):
+        assert oracle.table_alias_uses_as is False
+        
 # ---------------------------------------------------------------------------
 # Cross-dialect sanity
 # ---------------------------------------------------------------------------

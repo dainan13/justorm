@@ -677,12 +677,24 @@ _JOIN_KEYWORD = {
 # ---------------------------------------------------------------------------
 
 
+def _render_table_alias(cursor: Any, alias: str) -> str:
+    """Render ``[AS] alias`` after a table or subquery.
+
+    Oracle does not accept ``AS`` before a table alias; every other
+    dialect justorm supports does.  The renderer controls this via
+    ``table_alias_uses_as``.
+    """
+    quoted = cursor._render_identifier(alias)
+    if getattr(cursor, "table_alias_uses_as", True):
+        return f" AS {quoted}"
+    return f" {quoted}"
+
+
 def _render_from_item(source: Any, cursor: Any) -> Tuple[str, List[Any]]:
     if isinstance(source, _SubqueryAlias):
         inner_sql, params = source.subquery._render_sql(cursor)
         return (
-            f"({inner_sql}) AS "
-            f"{cursor._render_identifier(source.alias)}",
+            f"({inner_sql}){_render_table_alias(cursor, source.alias)}",
             params,
         )
     if isinstance(source, _TableSource):
@@ -691,7 +703,7 @@ def _render_from_item(source: Any, cursor: Any) -> Tuple[str, List[Any]]:
         else:
             base = cursor._render_identifier_multi(source.schema, source.table)
         if source.alias:
-            base += f" AS {cursor._render_identifier(source.alias)}"
+            base += _render_table_alias(cursor, source.alias)
         return base, []
     if isinstance(source, TableBuilder):
         return _render_from_item(source._state.from_source, cursor)
@@ -1072,7 +1084,7 @@ class TableBuilder:
         new._state.nowait = bool(nowait)
 
         sql, params, projection_names = new._render_select(projection)
-        rows = new._cursor._execute_and_fetch(sql, params)
+        rows = new._cursor._just_execute_and_fetch(sql, params)
         return _shape_rows(
             rows,
             shape,
@@ -1134,10 +1146,10 @@ class TableBuilder:
         values = [("(" + ", ".join(cells) + ")", params)]
         sql, all_params = new._render_insert(values, columns_list)
         if state.returning is not None:
-            fetched = new._cursor._execute_and_fetch(sql, all_params)
+            fetched = new._cursor._just_execute_and_fetch(sql, all_params)
             row_result = fetched[0] if fetched else None
             return _shape_returning_one(row_result, state.returning)
-        new._cursor._execute(sql, all_params)
+        new._cursor._just_execute(sql, all_params)
         return None
 
     def insert(self, rows, *, columns=None) -> Any:
@@ -1161,9 +1173,9 @@ class TableBuilder:
             values.append(("(" + ", ".join(cells) + ")", params))
         sql, all_params = new._render_insert(values, columns_list)
         if state.returning is not None:
-            fetched = new._cursor._execute_and_fetch(sql, all_params)
+            fetched = new._cursor._just_execute_and_fetch(sql, all_params)
             return _shape_returning_many(fetched, state.returning)
-        new._cursor._execute(sql, all_params)
+        new._cursor._just_execute(sql, all_params)
         return None
 
     def insert_many(self, rows, columns=None) -> Any:
@@ -1198,10 +1210,10 @@ class TableBuilder:
         if state.returning is not None:
             collected: List[Any] = []
             for params in param_sets:
-                fetched = cur._execute_and_fetch(sql, params)
+                fetched = cur._just_execute_and_fetch(sql, params)
                 collected.extend(fetched)
             return _shape_returning_many(collected, state.returning)
-        cur._execute_many(sql, param_sets)
+        cur._just_execute_many(sql, param_sets)
         return None
 
     # -- UPDATE / DELETE -----------------------------------------------
@@ -1227,9 +1239,9 @@ class TableBuilder:
         sql, params = new._render_update(assignments)
         state = new._insert_state or _InsertState()
         if state.returning is not None:
-            fetched = new._cursor._execute_and_fetch(sql, params)
+            fetched = new._cursor._just_execute_and_fetch(sql, params)
             return _shape_returning_many(fetched, state.returning)
-        new._cursor._execute(sql, params)
+        new._cursor._just_execute(sql, params)
         return None
 
     def delete(self) -> Any:
@@ -1250,9 +1262,9 @@ class TableBuilder:
         sql, params = new._render_delete()
         state = new._insert_state or _InsertState()
         if state.returning is not None:
-            fetched = new._cursor._execute_and_fetch(sql, params)
+            fetched = new._cursor._just_execute_and_fetch(sql, params)
             return _shape_returning_many(fetched, state.returning)
-        new._cursor._execute(sql, params)
+        new._cursor._just_execute(sql, params)
         return None
 
     # -- RETURNING / UPSERT --------------------------------------------
@@ -1297,10 +1309,24 @@ class TableBuilder:
         cur = self._cursor
         state = self._state
         select_head: List[str] = ["SELECT"]
+
+        # SQL Server rejects ``OFFSET ... FETCH`` without an ``ORDER
+        # BY``, so a limit with no offset is rendered as
+        # ``SELECT TOP n`` instead.  The renderer declares this via
+        # ``limit_without_offset_uses_top``.
+        use_top = (
+            getattr(cur, "limit_without_offset_uses_top", False)
+            and state.limit is not None
+            and state.offset is None
+        )
+
         if state.distinct_on:
             select_head.append(cur._render_distinct_on(list(state.distinct_on)))
         elif state.distinct:
             select_head.append("DISTINCT")
+        if use_top:
+            select_head.append(cur.render_limit_top(state.limit))
+
         sql_items, names = _render_projection(projection, cur)
         select_head.append(", ".join(sql_items))
         sql = " ".join(select_head)
@@ -1311,9 +1337,14 @@ class TableBuilder:
             sql += " WHERE " + where_sql
         if state.order:
             sql += " ORDER BY " + ", ".join(state.order)
-        limit_offset = cur._render_limit_offset(state.limit, state.offset)
-        if limit_offset:
-            sql += " " + limit_offset
+
+        # ``TOP n`` already carries the limit; skip the LIMIT / OFFSET
+        # suffix in that case.
+        if not use_top:
+            limit_offset = cur._render_limit_offset(state.limit, state.offset)
+            if limit_offset:
+                sql += " " + limit_offset
+
         if state.for_update or state.for_share:
             sql += " " + cur._render_for_update(
                 share=state.for_share,
@@ -1322,8 +1353,6 @@ class TableBuilder:
             )
         params = join_params + where_params
         if nested:
-            # Leave ``_PH`` markers alone so the outer statement can
-            # bind them together with its own.
             return sql, params, names
         sql, bound = _substitute_ph(sql, cur, params)
         return sql, bound, names

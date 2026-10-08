@@ -73,16 +73,12 @@ Initial release.
 
 ### Testing
 
-- 604 tests covering the builder, renderers, row-conversion helpers,
-  and integration against PostgreSQL (psycopg v3 and psycopg2), MySQL
-  (PyMySQL), and SQLite (sqlite3).
+- 700 tests covering the builder, renderers, row-conversion helpers,
+  and integration against all six supported drivers: PostgreSQL
+  (psycopg v3 and psycopg2), MySQL (PyMySQL), SQLite (sqlite3),
+  SQL Server (pymssql), and Oracle (python-oracledb).
 
 ### Notes
-
-- **pymssql and oracledb are renderer- and shape-tested only.**  They
-  ship with the full API surface and pass unit tests, but have **not**
-  been integration-tested against a live SQL Server or Oracle server.
-  Treat them as beta until you have verified them in your environment.
 
 - **Asynchronous drivers are not supported.**  The current release is
   synchronous only.

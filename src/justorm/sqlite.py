@@ -235,22 +235,22 @@ class Cursor(QueryMixin, SQLiteRenderer, JustBuilder):
     # Execution
     # ------------------------------------------------------------------
 
-    def _execute(self, sql: str, params: Any) -> None:
+    def _just_execute(self, sql: str, params: Any) -> None:
         self._cursor.execute(sql, params)
 
-    def _execute_and_fetch(
+    def _just_execute_and_fetch(
         self, sql: str, params: Any
     ) -> List[Any]:
         self._cursor.execute(sql, params)
         return self._cursor.fetchall()
 
-    def _execute_and_fetch_one(
+    def _just_execute_and_fetch_one(
         self, sql: str, params: Any
     ) -> Any:
         self._cursor.execute(sql, params)
         return self._cursor.fetchone()
 
-    def _execute_many(
+    def _just_execute_many(
         self, sql: str, param_sets: Iterable[Any]
     ) -> None:
         self._cursor.executemany(sql, list(param_sets))

@@ -6,33 +6,48 @@ Usage::
     import justorm.pymssql
 
     conn = pymssql.connect(...)
-    cur = conn.cursor(justorm.pymssql.Cursor)
+    cur = justorm.pymssql.Cursor(conn)
     rows = cur.users.where(id=1).select()
     cur.fetchall(format=dict)
     cur.query("SELECT ... FROM ... JOIN ...")
 
-The cursor is a subclass of :class:`pymssql.Cursor`, so every native
-attribute (``execute``, ``fetchone``, ``description``, ``rowcount``,
-...) keeps working exactly as before.  justorm only *adds* the fluent
-query builder on top, extends the ``fetch*`` methods with a
-``format=`` keyword, and adds the ``query`` escape hatch.
+Unlike the other drivers, the pymssql connection does not expose a
+cursor factory: ``Connection.cursor()`` returns the driver's own
+cursor class and does not accept a replacement.  And while
+``pymssql.Cursor`` *can* be subclassed, its ``__init__`` requires a
+positional ``as_dict`` argument that is easy to get wrong.  justorm
+therefore **wraps** the driver cursor, in the same way it wraps
+``sqlite3.Cursor``, rather than inheriting from it.
 
-PyMSSQL notes:
+The wrapper:
 
-* the cursor can be subclassed (it is implemented in Cython, but the
-  resulting type supports Python subclassing),
+* mixes in :class:`justorm.renderer.MSSQLRenderer`,
+  :class:`justorm.builder.JustBuilder`, and
+  :class:`justorm._query.QueryMixin`,
+* delegates every native DB-API method (``execute``, ``fetchone``,
+  ``description``, ``rowcount``, ...) to an inner ``pymssql.Cursor``,
+* forwards attribute access (``cur.users``) and item access
+  (``cur['...']``) to the justorm builder,
+* extends the three ``fetch*`` methods with a ``format=`` keyword that
+  selects ``tuple`` / ``dict`` / ``namedtuple`` output,
+* adds ``query()``, a one-line "execute and shape the result" helper.
+
+SQL Server specifics exposed by justorm:
+
+* identifiers are quoted with square brackets,
 * ``%s`` is used for placeholders, and literal ``%`` in SQL text must
   be doubled,
 * ``execute`` returns the number of affected rows (PEP 249),
 * ``RETURNING`` is not available; the SQL Server equivalent is the
-  ``OUTPUT`` clause, which justorm does not model,
+  ``OUTPUT`` clause, which has a different shape and is best written
+  as raw SQL,
 * upserts use ``MERGE``, which justorm does not model,
-* identifiers are quoted with square brackets.
-
-Because pymssql ships no ``__getattr__``, attribute access for table
-names goes through :class:`justorm.builder.JustBuilder` naturally.
-We still override ``__getattr__`` on this class for consistency with
-:mod:`justorm.pymysql`, where the override is required.
+* ``LIMIT`` / ``OFFSET`` map to ``OFFSET ... ROWS FETCH NEXT ...
+  ROWS ONLY``, which requires an ``ORDER BY`` clause,
+* ``FOR UPDATE`` is not a thing on SQL Server; row locking is done
+  through table hints such as ``WITH (UPDLOCK)``,
+* ``DISTINCT ON`` and ``ILIKE`` are not available,
+* ``DEFAULT`` is accepted inside a ``VALUES`` list.
 """
 
 from __future__ import annotations
@@ -50,32 +65,102 @@ from justorm.renderer import MSSQLRenderer
 __all__ = ["Cursor"]
 
 
-class Cursor(QueryMixin, _PyMSSQLCursor, MSSQLRenderer, JustBuilder):
-    """A pymssql cursor with the justorm query builder mixed in."""
+class Cursor(QueryMixin, MSSQLRenderer, JustBuilder):
+    """A wrapper around :class:`pymssql.Cursor` with the justorm builder."""
 
     # ------------------------------------------------------------------
-    # fetch* with format=
+    # Construction
     # ------------------------------------------------------------------
+
+    def __init__(
+        self,
+        connection: pymssql.Connection,
+        *,
+        cursor: Optional[_PyMSSQLCursor] = None,
+    ) -> None:
+        if not isinstance(connection, pymssql.Connection):
+            raise TypeError(
+                "justorm.pymssql.Cursor expects a pymssql.Connection, "
+                f"got {type(connection).__name__}"
+            )
+        self._conn = connection
+        # ``Connection.cursor()`` takes optional ``as_dict`` and
+        # ``arraysize`` arguments; with no arguments it uses the
+        # connection's defaults, which is what we want.
+        self._cursor = cursor if cursor is not None else connection.cursor()
+
+    # ------------------------------------------------------------------
+    # Native DB-API delegation
+    # ------------------------------------------------------------------
+
+    @property
+    def connection(self) -> pymssql.Connection:
+        return self._conn
+
+    @property
+    def description(self) -> Any:
+        return self._cursor.description
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        return self._cursor.lastrowid
+
+    @property
+    def arraysize(self) -> int:
+        return self._cursor.arraysize
+
+    @arraysize.setter
+    def arraysize(self, value: int) -> None:
+        self._cursor.arraysize = value
+
+    def execute(self, sql: str, parameters: Any = ()) -> "Cursor":
+        self._cursor.execute(sql, parameters)
+        return self
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Iterable[Iterable[Any]]
+    ) -> "Cursor":
+        self._cursor.executemany(sql, seq_of_parameters)
+        return self
 
     def fetchone(self, *, format: Any = None) -> Any:
-        row = super().fetchone()
-        return convert_row(row, self.description, format)
+        row = self._cursor.fetchone()
+        return convert_row(row, self._cursor.description, format)
 
     def fetchmany(
         self, size: Optional[int] = None, *, format: Any = None
     ) -> List[Any]:
         if size is None:
-            rows = super().fetchmany()
+            rows = self._cursor.fetchmany()
         else:
-            rows = super().fetchmany(size)
-        return convert_rows(rows, self.description, format)
+            rows = self._cursor.fetchmany(size)
+        return convert_rows(rows, self._cursor.description, format)
 
     def fetchall(self, *, format: Any = None) -> List[Any]:
-        rows = super().fetchall()
-        return convert_rows(rows, self.description, format)
+        rows = self._cursor.fetchall()
+        return convert_rows(rows, self._cursor.description, format)
+
+    def close(self) -> None:
+        try:
+            self._cursor.close()
+        except Exception:
+            pass
+
+    def __iter__(self) -> Any:
+        return iter(self._cursor)
+
+    def __enter__(self) -> "Cursor":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
-    # Attribute access
+    # Attribute and subscript access
     # ------------------------------------------------------------------
 
     def __getattr__(self, name: str) -> TableBuilder:
@@ -153,22 +238,23 @@ class Cursor(QueryMixin, _PyMSSQLCursor, MSSQLRenderer, JustBuilder):
     # Execution
     # ------------------------------------------------------------------
 
-    def _execute(self, sql: str, params: Any) -> None:
-        self.execute(sql, params)
+    def _just_execute(self, sql: str, params: Any) -> None:
+        self._cursor.execute(sql, params)
 
-    def _execute_and_fetch(
+    def _just_execute_and_fetch(
         self, sql: str, params: Any
     ) -> List[Any]:
-        self.execute(sql, params)
-        return self.fetchall()
+        self._cursor.execute(sql, params)
+        return self._cursor.fetchall()
 
-    def _execute_and_fetch_one(
+    def _just_execute_and_fetch_one(
         self, sql: str, params: Any
     ) -> Any:
-        self.execute(sql, params)
-        return self.fetchone()
+        self._cursor.execute(sql, params)
+        return self._cursor.fetchone()
 
-    def _execute_many(
+    def _just_execute_many(
         self, sql: str, param_sets: Iterable[Any]
     ) -> None:
-        self.executemany(sql, list(param_sets))
+        self._cursor.executemany(sql, list(param_sets))
+        
