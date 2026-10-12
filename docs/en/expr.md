@@ -226,22 +226,21 @@ Without parentheses, this:
 cur["a"] > 1 & cur["b"] > 2
 ```
 
-parses as:
+evaluates `1 & cur["b"]` first — and `Expr` has no `__rand__`, so
+the `&` raises `TypeError` at that point.  In other words, *most*
+forgotten-parentheses cases fail loudly at combination time rather
+than quietly producing wrong SQL.
 
-```python
-cur["a"] > (1 & cur["b"]) > 2
-```
-
-which is not what you mean.  Always parenthesise comparison operands
-when combining them:
+But "most" is not "all": when both sides are `Expr`, `&` reaches
+`Condition.__and__`, and a precedence mistake may produce a
+semantically wrong expression instead of raising.  **Always
+parenthesise comparison operands when combining them**:
 
 ```python
 (cur["a"] > 1) & (cur["b"] > 2)
 ```
 
 justorm cannot fix this in Python; it is a language-level rule.
-Getting it wrong will usually produce a `TypeError` from the `&`
-operator, but not always.
 
 ### Conditions have no SQL of their own
 
@@ -361,15 +360,15 @@ ORDER BY lower(name)
 With justorm:
 
 ```python
-cur.users.select({
-    cur.users["id"],
-    cur["lower(name) AS lname"],
-    cur["CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END AS status"],
-}).where(
+cur.users.where(
     cur.users["deleted_at"] == None,
 ).where(
     (cur.users["age"] >= 18) | (cur.users["verified"] == True),
-).orderby(cur["lower(name)"]).select()
+).orderby(cur["lower(name)"]).select({
+    cur.users["id"],
+    cur["lower(name) AS lname"],
+    cur["CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END AS status"],
+})
 ```
 
 The parameters come out as `[18, True]`.  The `18` and the `True` are

@@ -53,24 +53,38 @@ other drivers take the cursor class as an argument to
 
 ### PostgreSQL (psycopg v3)
 
+### PostgreSQL (psycopg v3)
+
 ```python
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect("postgresql://localhost/mydb")
-cur = conn.cursor(justorm.psycopg.Cursor)
-```
-
-psycopg's `Connection.cursor()` takes the cursor class in the
-`cursor_factory` keyword argument (the first positional argument is
-the *name* of a server-side cursor, which is a different concept).
-You can also set it once at connection time:
-
-```python
 conn = psycopg.connect(
     "postgresql://localhost/mydb",
     cursor_factory=justorm.psycopg.Cursor,
 )
+cur = conn.cursor()
+```
+
+psycopg's cursor factory is set on the **connection**, not on the
+cursor: pass `cursor_factory=` to `psycopg.connect(...)` (or to the
+`Connection` constructor).  `Connection.cursor()` itself does *not*
+accept a factory — its first positional argument is the server-side
+cursor *name*, which is a different concept:
+
+```python
+# Wrong: justorm.psycopg.Cursor is taken as a server-side cursor name
+cur = conn.cursor(justorm.psycopg.Cursor)
+
+# Right: set the factory on the connection
+conn = psycopg.connect(dsn, cursor_factory=justorm.psycopg.Cursor)
+cur = conn.cursor()
+```
+
+If the connection is already open, you can still set the attribute:
+
+```python
+conn.cursor_factory = justorm.psycopg.Cursor
 cur = conn.cursor()
 ```
 
@@ -111,8 +125,11 @@ import oracledb
 import justorm.oracledb
 
 conn = oracledb.connect(user="me", password="pw", dsn="localhost/mydb")
-cur = conn.cursor(justorm.oracledb.Cursor)
+cur = justorm.oracledb.Cursor(conn)
 ```
+
+python-oracledb's `Connection.cursor()` does *not* accept a cursor
+class, so justorm constructs its own cursor subclass directly.
 
 ## Setting up a table
 

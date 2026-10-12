@@ -305,6 +305,9 @@ justorm 不提供：
   逗号形式已经有害二十年了。
 - **join 提示**（`/*+ ... */`）。用 `where_raw` 或 `cur[...]`。
 - **改变结合性的括号 join 组**。发出的 SQL 总是左结合、无括号。
+- **`GROUP BY` / `HAVING`**。builder 没有专用方法；用
+  `cur.query(...)`，或把聚合放进子查询。见
+  [常见模式](#常见模式) 里的例子。
 
 模式是：justorm 覆盖你日常手写的大部分，其余留着逃生舱。
 
@@ -312,17 +315,27 @@ justorm 不提供：
 
 ### 数关联表的行数
 
+聚合 + `GROUP BY` 不完全在 builder 里：`GROUP BY` 没有专用方法。
+这个查询用 `cur.query(...)` 最清楚：
+
+```python
+cur.query(
+    """
+    SELECT users.id, count(o.id) AS n
+    FROM users
+    LEFT JOIN orders o ON users.id = o.user_id
+    GROUP BY users.id
+    """
+)
+```
+
+如果你只需要"每行一个聚合值"而不要 `GROUP BY`，可以用窗口函数
+写在 `select` 的 `Expr` 里：
+
 ```python
 o = cur.orders.as_("o")
 cur.users.left_join(o, on=cur.users["id"] == o["user_id"]) \
-    .select({cur.users["id"], cur["count(o.id) AS n"]})
-```
-
-`group_by` 不在 justorm 里；需要就用 `where_raw`，或用普通
-`Expr` `select` 聚合：
-
-```python
-cur.users.left_join(o, on=...).select({cur.users["id"], cur["count(o.id) AS n"]})
+    .select({cur.users["id"], cur["count(o.id) OVER (PARTITION BY users.id) AS n"]})
 ```
 
 ### 过滤右边

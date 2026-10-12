@@ -40,17 +40,24 @@ After:
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect(...)
-cur = conn.cursor(justorm.psycopg.Cursor)
+conn = psycopg.connect(..., cursor_factory=justorm.psycopg.Cursor)
+cur = conn.cursor()
 cur.execute("SELECT id, name FROM users WHERE id = %s", [1])
 row = cur.fetchone()
 ```
 
-The only change is the cursor class.  Everything else — the `execute`
-call, the `%s` placeholder, the `fetchone` — works exactly as before.
-This is the whole point of the "mix into the cursor" design: the
-cursor *is* a psycopg cursor, so nothing about the existing code has
-to change in this step.
+The only change is the extra `cursor_factory=` at connection time.
+Everything else — the `execute` call, the `%s` placeholder, the
+`fetchone` — works exactly as before.  This is the whole point of
+the "mix into the cursor" design: the cursor *is* a psycopg cursor,
+so nothing about the existing code has to change in this step.
+
+If the connection is already open, you can also set the attribute:
+
+```python
+conn.cursor_factory = justorm.psycopg.Cursor
+cur = conn.cursor()
+```
 
 For SQLite, the change is slightly different because `sqlite3.Cursor`
 cannot be subclassed:
@@ -380,7 +387,16 @@ cur.execute(
     "INSERT INTO users (name) VALUES (:p1) RETURNING id INTO :p2",
     {"p1": "Alice", "p2": var},
 )
-new_id = var.getvalue()
+new_id = var.getvalue()[0]
+```
+
+python-oracledb 26.x sizes OUT binds to the cursor's `arraysize`
+(default 100), so even a single `RETURNING` row comes back as a
+one-element list.  For a scalar, construct the `var` with
+`arraysize=1`:
+
+```python
+var = cur.var(oracledb.NUMBER, arraysize=1)
 ```
 
 ### `JOIN`
@@ -480,10 +496,8 @@ Three stages.
 ### Adopt the cursor
 
 ```python
-import justorm.psycopg
-
 def find_active_users(conn, min_age):
-    cur = conn.cursor(justorm.psycopg.Cursor)
+    cur = conn.cursor()
     cur.execute(
         "SELECT id, name, age FROM users "
         "WHERE active = %s AND age >= %s "
@@ -494,16 +508,19 @@ def find_active_users(conn, min_age):
     return cur.fetchall()
 ```
 
+This assumes `conn` was created with
+`psycopg.connect(..., cursor_factory=justorm.psycopg.Cursor)`.  That
+is the only change — the `execute` call has the same syntax as
+before.
+
 Nothing else changes.  If the function is used everywhere, this is
 enough.
 
 ### Rewrite the statement
 
 ```python
-import justorm.psycopg
-
 def find_active_users(conn, min_age):
-    cur = conn.cursor(justorm.psycopg.Cursor)
+    cur = conn.cursor()
     return (
         cur.users
         .where(active=True)

@@ -1,24 +1,46 @@
 # justorm
 
-A lightweight, schemaless SQL builder that mixes into native database
-cursors.
+justorm is a lightweight, schemaless SQL builder for Python that mixes
+into native database cursors.
+
+justorm 是一个轻量的、无 schema 的 Python SQL 构建器，混入原生的数据库游标。
+
+There are no models, no sessions, no identity maps, and no
+migrations; justorm gives you a fluent way to write SQL against a
+real DB-API cursor, while leaving the cursor in charge.
+
+没有 model、没有 session、没有 identity map、没有 migration；
+justorm 给你一套流畅的方式，在真实的 DB-API 游标上写 SQL，
+游标始终掌控一切。
+
+### PostgreSQL (psycopg v3)
 
 ```python
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect("postgresql://localhost/mydb")
-with conn.cursor(justorm.psycopg.Cursor) as cur:
+conn = psycopg.connect(
+    "postgresql://localhost/mydb",
+    cursor_factory=justorm.psycopg.Cursor,
+)
+with conn.cursor() as cur:
     rows = cur.users.where(id=1).select()
     cur.users.where(id=1).update(name="Alice")
     cur.users.append(name="Bob")
 ```
 
-justorm is **not** an ORM in the "hide the database" sense.  There are
-no models, no sessions, no identity maps, no migrations.  What it does
-is give you a fluent, Pythonic way to *write* SQL against a real
-DB-API cursor, while leaving the cursor — and the database it talks
-to — fully in charge.
+### MySQL (PyMySQL)
+
+```python
+import pymysql
+import justorm.pymysql
+
+conn = pymysql.connect(host="localhost", user="me", database="mydb")
+cur = conn.cursor(justorm.pymysql.Cursor)
+rows = cur.users.where(id=1).select()
+cur.users.where(id=1).update(name="Alice")
+cur.users.append(name="Bob")
+```
 
 ## Design principles
 
@@ -32,7 +54,7 @@ connection handling, transactions, error handling, `fetchone()` —
 keeps working exactly as it did before.  justorm only *adds* methods.
 
 ```python
-with conn.cursor(justorm.psycopg.Cursor) as cur:
+with conn.cursor() as cur:
     cur.execute("SELECT 1")            # native psycopg
     cur.users.where(id=1).select()     # justorm
 ```

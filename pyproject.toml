@@ -5,8 +5,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "justorm"
-version = "1.0.0"
-description = "A lightweight, schemaless SQL builder that mixes into native database cursors."
+version = "1.0.1"
+description = "justorm: A lightweight, schemaless SQL builder that mixes into native database cursors."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -14,6 +14,11 @@ authors = [
     { name = "justorm contributors" },
 ]
 keywords = [
+    "justorm",
+    "justorm sql builder",
+    "schemaless sql builder",
+    "db-api sql builder",
+    "cursor mixin sql",
     "sql",
     "orm",
     "query-builder",
@@ -72,6 +77,8 @@ dev = [
 Homepage = "https://github.com/dainan13/justorm"
 Source = "https://github.com/dainan13/justorm"
 Issues = "https://github.com/dainan13/justorm/issues"
+Documentation = "https://github.com/dainan13/justorm/tree/main/docs"
+Changelog = "https://github.com/dainan13/justorm/blob/main/CHANGELOG.md"
 
 
 [tool.hatch.build.targets.wheel]

@@ -40,11 +40,12 @@ each is a separate module with its own `Cursor` class.
 | `ON CONFLICT ( ... ) WHERE ...` | yes        | n/a          | **no**         | n/a          | n/a           |
 | `DISTINCT ON`                   | yes        | **no**       | **no**         | **no**       | **no**        |
 | `ILIKE`                         | yes        | **no**       | **no**         | **no**       | **no**        |
-| `FOR UPDATE` / `FOR SHARE`      | yes        | 8.0+         | **no**         | **no**       | yes           |
-| `LIMIT` without `OFFSET`        | yes        | yes          | yes            | yes          | yes           |
+| `FOR UPDATE` / `FOR SHARE`      | yes        | 8.0+         | **no**         | **no**       | `FOR UPDATE`  |
+| `LIMIT` without `OFFSET`        | yes        | yes          | yes            | yes (`TOP n`)| yes           |
 | `OFFSET` without `LIMIT`        | yes        | **no**       | yes (3.30+)    | yes          | yes           |
 | `DEFAULT` in `VALUES`           | yes        | yes          | **no**         | yes          | **no**        |
 | Insert output                   | `RETURNING` | —           | `RETURNING`    | `OUTPUT`     | `RETURNING INTO` |
+| `OFFSET` requires `ORDER BY`    | no         | no           | no             | **yes**      | no            |
 
 "yes" / "no" mean whether justorm generates that SQL.  Some features
 the database has but justorm does not model (MySQL's `UPDATE ...
@@ -291,7 +292,7 @@ cur.users.where_raw("LOWER(name) LIKE LOWER(%s)", ["a%"])
 On Oracle:
 
 ```python
-cur.users.where_raw("NLS_UPPER(name) LIKE NLS_UPPER(:p1)", ["a%"])
+cur.users.where_raw("NLS_UPPER(name) LIKE NLS_UPPER(:p1)", {"p1": "a%"})
 ```
 
 ## FOR UPDATE / FOR SHARE
@@ -336,7 +337,10 @@ MySQL's `LIMIT offset, count` shorthand is not generated; use `LIMIT`
 and `OFFSET` as above, or `.where_raw(...)` if you really need the
 comma form.
 
-SQL Server requires an `ORDER BY` for this to be legal; add one.
+SQL Server requires an `ORDER BY` for `OFFSET ... FETCH` to be legal;
+add one yourself.  If you use `limit` without `offset`, however,
+justorm switches to `SELECT TOP n`, which has no such requirement —
+so a "limit-only" query is naturally legal on SQL Server.
 
 ## UPDATE / DELETE restrictions
 

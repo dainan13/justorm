@@ -38,6 +38,10 @@ Throughout this page:
 
 ## Cursor entry points
 
+This page assumes you already have a justorm cursor.  How to create
+one (`conn.cursor()`, `justorm.pymssql.Cursor(conn)`, ...) is covered
+in [Quickstart](quickstart.md#creating-a-cursor).
+
 ### `cur.table(name)` / `cur.table(schema, name)` / `cur.table("schema.name")`
 
 Return a [`TableBuilder`](#tablebuilder--select) for the named table.
@@ -697,7 +701,7 @@ Terminal (but non-executing).  Returns a `Subquery` object that can be
 used as a join target.
 
 ```python
-sub = cur.orders.where(total__gt=100).select_subquery({"user_id"})
+sub = cur.orders.where(cur.orders["total"] > 100).select_subquery({"user_id"})
 ```
 
 The arguments follow the same rules as `select`, except that the
@@ -723,7 +727,7 @@ subquery's column.
 A subquery alias can also be the primary table:
 
 ```python
-s = cur.orders.where(total__gt=100).select_subquery({"user_id"}).as_("s")
+s = cur.orders.where(cur.orders["total"] > 100).select_subquery({"user_id"}).as_("s")
 s.join(cur.users, on=s["user_id"] == cur.users["id"]).select()
 ```
 

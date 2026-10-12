@@ -72,7 +72,24 @@ class TestCursorIdentity:
         finally:
             cur.close()
 
+    def test_cursor_factory_is_keyword_only(self, psycopg_module, pg_dsn):
+        import justorm.psycopg
 
+        conn = psycopg_module.connect(pg_dsn)
+        try:
+            # psycopg3's first positional argument is ``name`` (for
+            # server-side cursors), not the cursor class.  The factory
+            # must go through ``cursor_factory=``.
+            with pytest.raises(TypeError):
+                conn.cursor(justorm.psycopg.Cursor)
+            cur = conn.cursor(cursor_factory=justorm.psycopg.Cursor)
+            try:
+                assert isinstance(cur, justorm.psycopg.Cursor)
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+    
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

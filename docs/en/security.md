@@ -268,15 +268,29 @@ yourself.  A common pattern is a thin wrapper:
 
 ```python
 class LoggingCursor(justorm.psycopg.Cursor):
-    def _execute(self, sql, params):
+    def _just_execute(self, sql, params):
         logger.debug("SQL: %s  PARAMS: %r", sql, params)
-        super()._execute(sql, params)
+        super()._just_execute(sql, params)
+
+    def _just_execute_and_fetch(self, sql, params):
+        logger.debug("SQL: %s  PARAMS: %r", sql, params)
+        return super()._just_execute_and_fetch(sql, params)
 ```
 
-`_execute` and `_execute_and_fetch` are the two places where the
-builder hands SQL to the driver.  Both are stable parts of the
-internal interface; overriding them is the supported way to
-instrument the library.
+The builder hands SQL to the driver through four `_just_`-prefixed
+methods:
+
+* `_just_execute(sql, params)` — writes that do not return rows.
+* `_just_execute_and_fetch(sql, params)` — multi-row fetches
+  (`select`, `returning`).
+* `_just_execute_and_fetch_one(sql, params)` — single-row fetch.
+* `_just_execute_many(sql, param_sets)` — `insert_many`'s
+  `executemany`.
+
+All four are a stable protocol between the builder and the cursor;
+overriding them is the supported way to instrument the library.
+The `_just_` prefix exists to avoid clashing with the driver's own
+internal methods (notably python-oracledb's `Cursor._execute`).
 
 If you log SQL, remember that bound parameters may contain sensitive
 data (passwords, tokens, personal information).  The placeholder

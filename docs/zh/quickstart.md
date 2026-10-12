@@ -52,19 +52,32 @@ cur = justorm.sqlite.Cursor(conn)
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect("postgresql://localhost/mydb")
-cur = conn.cursor(justorm.psycopg.Cursor)
-```
-
-`psycopg` 的 `Connection.cursor()` 把 cursor 类放在 `cursor_factory` 关键字
-参数里（第一个位置参数是 **服务端 cursor 的名字**，完全是另一回事）。
-也可以在 `connect()` 里一次性指定：
-
-```python
 conn = psycopg.connect(
     "postgresql://localhost/mydb",
     cursor_factory=justorm.psycopg.Cursor,
 )
+cur = conn.cursor()
+```
+
+psycopg 的 cursor 工厂是在 **建立连接时** 通过 `cursor_factory=` 指定的：
+`psycopg.connect(..., cursor_factory=...)`，或在
+`Connection` 构造时传入。`Connection.cursor()` 本身 **不** 接收工厂——
+它的第一个位置参数是 **服务端 cursor 的名字**（`name`，用于
+server-side cursor），和 cursor 类完全是另一回事：
+
+```python
+# 错误：justorm.psycopg.Cursor 会被当成服务端 cursor 的名字
+cur = conn.cursor(justorm.psycopg.Cursor)
+
+# 正确：工厂在连接时指定
+conn = psycopg.connect(dsn, cursor_factory=justorm.psycopg.Cursor)
+cur = conn.cursor()
+```
+
+如果连接已经建好、不想重建，可以改 `conn.cursor_factory` 属性：
+
+```python
+conn.cursor_factory = justorm.psycopg.Cursor
 cur = conn.cursor()
 ```
 
@@ -95,8 +108,12 @@ import pymssql
 import justorm.pymssql
 
 conn = pymssql.connect(server="localhost", user="me", database="mydb")
-cur = conn.cursor(justorm.pymssql.Cursor)
+cur = justorm.pymssql.Cursor(conn)
 ```
+
+pymssql 的 `Connection.cursor()` **不** 接收 cursor 类，所以
+justorm 直接包装一个连接上的原生 cursor。见
+[方言](dialects.md#方言一览) 里的说明。
 
 ### Oracle
 
@@ -105,8 +122,11 @@ import oracledb
 import justorm.oracledb
 
 conn = oracledb.connect(user="me", password="pw", dsn="localhost/mydb")
-cur = conn.cursor(justorm.oracledb.Cursor)
+cur = justorm.oracledb.Cursor(conn)
 ```
+
+python-oracledb 的 `Connection.cursor()` **不** 接收 cursor 类，所以
+justorm 直接构造自己的 cursor 子类。
 
 ## 建表
 

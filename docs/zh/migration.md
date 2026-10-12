@@ -34,16 +34,24 @@ row = cur.fetchone()
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect(...)
-cur = conn.cursor(justorm.psycopg.Cursor)
+conn = psycopg.connect(..., cursor_factory=justorm.psycopg.Cursor)
+cur = conn.cursor()
 cur.execute("SELECT id, name FROM users WHERE id = %s", [1])
 row = cur.fetchone()
 ```
 
-唯一改动是 cursor 类。其他——`execute` 调用、`%s` 占位符、
-`fetchone`——和以前完全一样工作。"混入游标"设计的全部意义就在
-这里：cursor **就是** psycopg cursor，所以这一步不需要改任何现有
-代码。
+唯一改动是连接建立时多了一个 `cursor_factory=`。其他——`execute`
+调用、`%s` 占位符、`fetchone`——和以前完全一样工作。"混入游标"
+设计的全部意义就在这里：cursor **就是** psycopg cursor，所以
+这一步不需要改任何现有代码。
+
+如果连接已经建好、不想重建，也可以改 `conn.cursor_factory`
+属性：
+
+```python
+conn.cursor_factory = justorm.psycopg.Cursor
+cur = conn.cursor()
+```
 
 SQLite 上改动稍不同，因为 `sqlite3.Cursor` 不能子类化：
 
@@ -357,7 +365,15 @@ cur.execute(
     "INSERT INTO users (name) VALUES (:p1) RETURNING id INTO :p2",
     {"p1": "Alice", "p2": var},
 )
-new_id = var.getvalue()
+new_id = var.getvalue()[0]
+```
+
+python-oracledb 26.x 把 OUT 绑定的大小定成 cursor 的 `arraysize`
+（默认 100），所以即使只 `RETURNING` 一行，`getvalue()` 也返回
+一个单元素 list。想要标量，构造 `var` 时传 `arraysize=1`：
+
+```python
+var = cur.var(oracledb.NUMBER, arraysize=1)
 ```
 
 ### `JOIN`
@@ -454,10 +470,8 @@ def find_active_users(conn, min_age):
 ### 换上 cursor
 
 ```python
-import justorm.psycopg
-
 def find_active_users(conn, min_age):
-    cur = conn.cursor(justorm.psycopg.Cursor)
+    cur = conn.cursor()
     cur.execute(
         "SELECT id, name, age FROM users "
         "WHERE active = %s AND age >= %s "
@@ -468,15 +482,18 @@ def find_active_users(conn, min_age):
     return cur.fetchall()
 ```
 
+这里假设 `conn` 已经在建立时通过
+`psycopg.connect(..., cursor_factory=justorm.psycopg.Cursor)`
+挂上了 justorm cursor。改动只有这一处——`execute` 调用的语法和
+以前完全一样。
+
 其他不变。如果函数到处都用，这一步就够了。
 
 ### 重写语句
 
 ```python
-import justorm.psycopg
-
 def find_active_users(conn, min_age):
-    cur = conn.cursor(justorm.psycopg.Cursor)
+    cur = conn.cursor()
     return (
         cur.users
         .where(active=True)

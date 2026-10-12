@@ -343,6 +343,9 @@ cur.query(
 )
 ```
 
+Oracle 版本不同：Oracle 不接受表别名前的 `AS`，所以 `t` / `s`
+直接跟在表名后。占位符也是命名形式 `:p1` / `:p2`，参数传 dict。
+
 ```python
 # Oracle
 cur.query(

@@ -1,13 +1,16 @@
 # justorm
 
-一个轻量的、无 schema 的 SQL 构建器，混入原生的数据库游标。
+justorm 是一个轻量的、无 schema 的 Python SQL 构建器，混入原生的数据库游标。
 
 ```python
 import psycopg
 import justorm.psycopg
 
-conn = psycopg.connect("postgresql://localhost/mydb")
-with conn.cursor(justorm.psycopg.Cursor) as cur:
+conn = psycopg.connect(
+    "postgresql://localhost/mydb",
+    cursor_factory=justorm.psycopg.Cursor,
+)
+with conn.cursor() as cur:
     rows = cur.users.where(id=1).select()
     cur.users.where(id=1).update(name="Alice")
     cur.users.append(name="Bob")
@@ -24,7 +27,7 @@ justorm 建立在五条原则上。
 每个驱动的入口都是那个驱动原生游标的子类（SQLite 例外，是包装）。你的其他代码——连接管理、事务、异常处理、`fetchone()`——全都保持原样。justorm 只是**加**方法。
 
 ```python
-with conn.cursor(justorm.psycopg.Cursor) as cur:
+with conn.cursor() as cur:
     cur.execute("SELECT 1")            # 原生 psycopg
     cur.users.where(id=1).select()     # justorm
 ```

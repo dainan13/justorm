@@ -359,6 +359,11 @@ cur.query(
 )
 ```
 
+The Oracle version differs: Oracle does not accept `AS` before a
+table alias, so `t` / `s` follow the table name directly.  Oracle
+also uses named placeholders (`:p1`, `:p2`) with a dict of
+parameters.
+
 ```python
 # Oracle
 cur.query(

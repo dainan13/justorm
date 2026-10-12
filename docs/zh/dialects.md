@@ -36,11 +36,12 @@ Oracle 之间的差异。你连的是 MySQL，就写 `.on_duplicate(...)`；
 | `ON CONFLICT ( ... ) WHERE ...` | 是         | n/a          | **否**         | n/a          | n/a           |
 | `DISTINCT ON`                   | 是         | **否**       | **否**         | **否**       | **否**        |
 | `ILIKE`                         | 是         | **否**       | **否**         | **否**       | **否**        |
-| `FOR UPDATE` / `FOR SHARE`      | 是         | 8.0+         | **否**         | **否**       | 是            |
-| `LIMIT` 无 `OFFSET`             | 是         | 是           | 是             | 是           | 是            |
+| `FOR UPDATE` / `FOR SHARE`      | 是         | 8.0+         | **否**         | **否**       | `FOR UPDATE`  |
+| `LIMIT` 无 `OFFSET`             | 是         | 是           | 是             | 是（`TOP n`）| 是            |
 | `OFFSET` 无 `LIMIT`             | 是         | **否**       | 是（3.30+）    | 是           | 是            |
 | `VALUES` 里的 `DEFAULT`         | 是         | 是           | **否**         | 是           | **否**        |
 | `RETURNING` / `OUTPUT` 输出     | `RETURNING` | —           | `RETURNING`    | `OUTPUT`     | `RETURNING INTO` |
+| `OFFSET` 需要 `ORDER BY`        | 否         | 否           | 否             | **是**       | 否            |
 
 **"是"/"否"** 是指 justorm 是否生成这段 SQL。有些特性数据库本身
 有，但 justorm 不建模（比如 MySQL 的 `UPDATE ... LIMIT`、SQL
@@ -271,7 +272,7 @@ cur.users.where_raw("LOWER(name) LIKE LOWER(%s)", ["a%"])
 Oracle 上：
 
 ```python
-cur.users.where_raw("NLS_UPPER(name) LIKE NLS_UPPER(:p1)", ["a%"])
+cur.users.where_raw("NLS_UPPER(name) LIKE NLS_UPPER(:p1)", {"p1": "a%"})
 ```
 
 ## FOR UPDATE / FOR SHARE
@@ -315,7 +316,10 @@ cur.users.limit(10).offset(20).select()
 MySQL 的 `LIMIT offset, count` 简写不生成；用上面的 `LIMIT` /
 `OFFSET`，或 `.where_raw(...)`。
 
-SQL Server 需要 `ORDER BY` 才合法；自己加。
+SQL Server 的 `OFFSET ... FETCH` 需要 `ORDER BY` 才合法；自己加。
+不过如果只有 `limit`、没有 `offset`，justorm 会改用
+`SELECT TOP n`（同样不需要 `ORDER BY`）——所以"只有 limit"的
+查询在 SQL Server 上是天然合法的。
 
 ## UPDATE / DELETE 限制
 

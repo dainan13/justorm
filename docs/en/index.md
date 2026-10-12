@@ -1,7 +1,7 @@
 # justorm
 
-A lightweight, schemaless SQL builder that mixes into native database
-cursors.
+justorm is a lightweight, schemaless SQL builder for Python that mixes
+into native database cursors.
 
 ```python
 import psycopg
@@ -32,8 +32,8 @@ connection handling, transactions, error handling, `fetchone()` —
 keeps working exactly as it did before.  justorm only *adds* methods.
 
 ```python
-with conn.cursor(justorm.psycopg.Cursor) as cur:
-    cur.execute("SELECT 1")            # native psycopg
+with conn.cursor() as cur:
+    cur.execute("SELECT 1")            # 原生 psycopg
     cur.users.where(id=1).select()     # justorm
 ```
 

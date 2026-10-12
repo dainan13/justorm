@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-13
+
+### Fixed
+
+- **README example for psycopg (v3).**  The example passed
+  `justorm.psycopg.Cursor` as a positional argument to
+  `conn.cursor()`.  psycopg3's first positional argument is the
+  server-side cursor *name*, not the cursor class; the factory must
+  go through `cursor_factory=` on `psycopg.connect(...)` (or be set
+  as the connection's `cursor_factory` attribute).
+
+- **Documentation fixes across `docs/`.**
+  - psycopg (v3), pymssql, and oracledb cursor-creation snippets in
+    the quickstart, index, and migration guides.
+  - `select_subquery` examples used a Django-style
+    `where(total__gt=100)` keyword; replaced with the expression form
+    `where(cur.orders["total"] > 100)`.
+  - The `security.md` logging example overrode `_execute` /
+    `_execute_and_fetch`, which had been renamed to `_just_execute` /
+    `_just_execute_and_fetch` before 1.0.0 (the `_just_` prefix avoids
+    clashing with python-oracledb's own `Cursor._execute`).  The
+    example now uses the correct names and lists all four
+    `_just_`-prefixed protocol methods.
+  - `join.md` aggregation example: `GROUP BY` is not modelled by the
+    builder; the example now uses `cur.query(...)` or a window
+    function.
+  - Oracle `RETURNING INTO` example: on python-oracledb 26.x
+    `var.getvalue()` returns a list (sized to the cursor's
+    `arraysize`, default 100), not a scalar; the example now indexes
+    the first element and notes the `arraysize=1` alternative.
+  - `expr.md` worked example reordered so the projection is passed
+    to the terminal `select()` rather than an earlier call.
+  - Dialect summary table: SQL Server's `LIMIT` without `OFFSET` is
+    now noted as `SELECT TOP n`; Oracle's row is now `FOR UPDATE`
+    only (Oracle has no `FOR SHARE`); added a row for `OFFSET`
+    requiring `ORDER BY`.
+
+### Changed
+
+- **`pyproject.toml` metadata.**
+  - `keywords` now leads with `justorm` and brand-adjacent phrases,
+    followed by the driver names.
+  - `description` now begins with `justorm:`.
+  - `project_urls` gains `Documentation` and `Changelog` entries.
+
+- **`README.md` introduction.**
+  - The opening paragraphs are now mirrored in Chinese.
+  - The example is presented as a PostgreSQL (psycopg v3) / MySQL
+    (PyMySQL) pair.
+  - A one-line summary was added under the title to improve search
+    discoverability.
+
+### Testing
+
+- Added a regression test asserting that psycopg3's
+  `Connection.cursor()` does not accept the cursor factory as a
+  positional argument.
+
 ## [1.0.0] - 2026-09-29
 
 Initial release.
@@ -88,5 +146,6 @@ Initial release.
   those concerns belong to the surrounding application or to the
   driver.
 
-[Unreleased]: https://github.com/dainan13/justorm/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/dainan13/justorm/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/dainan13/justorm/releases/tag/v1.0.1
 [1.0.0]: https://github.com/dainan13/justorm/releases/tag/v1.0.0

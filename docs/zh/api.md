@@ -36,6 +36,10 @@
 
 ## Cursor 入口
 
+本页假设你已经有一个 justorm cursor。怎么构造（`conn.cursor()`、
+`justorm.pymssql.Cursor(conn)` 等）见
+[快速开始](quickstart.md#创建-cursor)。
+
 ### `cur.table(name)` / `cur.table(schema, name)` / `cur.table("schema.name")`
 
 返回该表的 [`TableBuilder`](#tablebuilder--select)。
@@ -660,7 +664,7 @@ Oracle 没有 `FOR SHARE`；渲染器把 `share=True` 映射成
 终端（但不执行）。返回一个 `Subquery` 对象，可用作 join 目标。
 
 ```python
-sub = cur.orders.where(total__gt=100).select_subquery({"user_id"})
+sub = cur.orders.where(cur.orders["total"] > 100).select_subquery({"user_id"})
 ```
 
 参数遵循和 `select` 一样的规则，除了结果不取——生成的 SQL 嵌进
@@ -684,7 +688,7 @@ cur.users.join(s, on=cur.users["id"] == s["user_id"]).select()
 子查询别名也可以做主表：
 
 ```python
-s = cur.orders.where(total__gt=100).select_subquery({"user_id"}).as_("s")
+s = cur.orders.where(cur.orders["total"] > 100).select_subquery({"user_id"}).as_("s")
 s.join(cur.users, on=s["user_id"] == cur.users["id"]).select()
 ```
 

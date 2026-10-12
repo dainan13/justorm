@@ -207,20 +207,20 @@ Python 运算符优先级把 `&` 和 `|` 放在比较**之上**。不加括号�
 cur["a"] > 1 & cur["b"] > 2
 ```
 
-解析成：
+在 Python 里的求值顺序是 `1 & cur["b"]` 先算——而 `Expr` 没有
+`__rand__`，所以 `&` 会在这一步抛 `TypeError`。也就是说，
+**大多数**忘记加括号的情况会在组合条件时立刻报错，而不是
+悄悄生成错误 SQL。
 
-```python
-cur["a"] > (1 & cur["b"]) > 2
-```
-
-不是你的意思。组合时永远给比较操作数加括号：
+但"大多数"不是"全部"：如果两侧都是 `Expr`，`&` 会走到
+`Condition.__and__`，此时优先级错误可能不会炸，而是生成一个
+语义错误的表达式。**组合条件时永远给比较操作数加括号**：
 
 ```python
 (cur["a"] > 1) & (cur["b"] > 2)
 ```
 
-justorm 在 Python 里改不了这个；语言级规则。搞错通常会产生
-`&` 运算符的 `TypeError`，但不总是。
+justorm 在 Python 里改不了这个；语言级规则。
 
 ### 条件没有自己的 SQL
 
@@ -330,15 +330,15 @@ ORDER BY lower(name)
 用 justorm：
 
 ```python
-cur.users.select({
-    cur.users["id"],
-    cur["lower(name) AS lname"],
-    cur["CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END AS status"],
-}).where(
+cur.users.where(
     cur.users["deleted_at"] == None,
 ).where(
     (cur.users["age"] >= 18) | (cur.users["verified"] == True),
-).orderby(cur["lower(name)"]).select()
+).orderby(cur["lower(name)"]).select({
+    cur.users["id"],
+    cur["lower(name) AS lname"],
+    cur["CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END AS status"],
+})
 ```
 
 参数是 `[18, True]`。`18` 和 `True` 被绑定；`'adult'` 和 `'minor'`

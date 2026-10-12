@@ -322,6 +322,9 @@ justorm does not provide:
 * **Join hints** (`/*+ ... */`).  Use `where_raw` or `cur[...]`.
 * **Parenthesised join groups** that change the associativity.  The
   emitted SQL is always left-associative and unparenthesised.
+* **`GROUP BY` / `HAVING`.**  The builder has no dedicated method for
+  these; use `cur.query(...)`, or push the aggregation into a
+  subquery.  See [Common patterns](#common-patterns) for an example.
 
 The pattern here is: justorm covers what you would write by hand most
 of the time, and leaves the escape hatches open for the rest.
@@ -330,17 +333,28 @@ of the time, and leaves the escape hatches open for the rest.
 
 ### Count rows in a related table
 
+Aggregation with `GROUP BY` is not fully modelled by the builder:
+there is no dedicated `GROUP BY` method.  For this query,
+`cur.query(...)` is the clearest option:
+
+```python
+cur.query(
+    """
+    SELECT users.id, count(o.id) AS n
+    FROM users
+    LEFT JOIN orders o ON users.id = o.user_id
+    GROUP BY users.id
+    """
+)
+```
+
+If you only need a per-row aggregate value and no `GROUP BY`, use a
+window function in an `Expr` inside `select`:
+
 ```python
 o = cur.orders.as_("o")
 cur.users.left_join(o, on=cur.users["id"] == o["user_id"]) \
-    .select({cur.users["id"], cur["count(o.id) AS n"]})
-```
-
-`group_by` is not part of justorm; use `where_raw` for that, or
-`select` the aggregate with a plain `Expr`:
-
-```python
-cur.users.left_join(o, on=...).select({cur.users["id"], cur["count(o.id) AS n"]})
+    .select({cur.users["id"], cur["count(o.id) OVER (PARTITION BY users.id) AS n"]})
 ```
 
 ### Filter on the right-hand side

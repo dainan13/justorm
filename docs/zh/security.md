@@ -235,14 +235,26 @@ justorm 不记任何东西。要看生成的 SQL，用驱动自己的日志，�
 
 ```python
 class LoggingCursor(justorm.psycopg.Cursor):
-    def _execute(self, sql, params):
+    def _just_execute(self, sql, params):
         logger.debug("SQL: %s  PARAMS: %r", sql, params)
-        super()._execute(sql, params)
+        super()._just_execute(sql, params)
+
+    def _just_execute_and_fetch(self, sql, params):
+        logger.debug("SQL: %s  PARAMS: %r", sql, params)
+        return super()._just_execute_and_fetch(sql, params)
 ```
 
-`_execute` 和 `_execute_and_fetch` 是 builder 把 SQL 交给驱动的
-两个地方。两者都是内部接口的稳定部分；覆盖它们是给库插桩的受支持
-方式。
+builder 把 SQL 交给驱动时走的是四个 `_just_` 前缀的方法：
+
+- `_just_execute(sql, params)` —— 不取结果的写入。
+- `_just_execute_and_fetch(sql, params)` —— 取多行（`select`、`returning`）。
+- `_just_execute_and_fetch_one(sql, params)` —— 取一行。
+- `_just_execute_many(sql, param_sets)` —— `insert_many` 的
+  `executemany`。
+
+它们都是 builder 和 cursor 之间的稳定协议，覆盖它们是给库插桩的
+受支持方式。名字带 `_just_` 前缀是为了避开驱动自己的内部方法
+（尤其 python-oracledb 有 `Cursor._execute`）。
 
 如果记 SQL，记住绑参数可能含敏感数据（密码、token、个人信息）。
 占位符风格意味着值不在 SQL 字符串里——这对安全是好事——但你在
