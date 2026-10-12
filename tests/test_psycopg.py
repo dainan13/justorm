@@ -72,17 +72,29 @@ class TestCursorIdentity:
         finally:
             cur.close()
 
-    def test_cursor_factory_is_keyword_only(self, psycopg_module, pg_dsn):
+    def test_cursor_factory_is_on_connection(self, psycopg_module, pg_dsn):
         import justorm.psycopg
 
         conn = psycopg_module.connect(pg_dsn)
         try:
-            # psycopg3's first positional argument is ``name`` (for
-            # server-side cursors), not the cursor class.  The factory
-            # must go through ``cursor_factory=``.
-            with pytest.raises(TypeError):
-                conn.cursor(justorm.psycopg.Cursor)
-            cur = conn.cursor(cursor_factory=justorm.psycopg.Cursor)
+            # psycopg3's first positional argument to ``cursor()`` is
+            # the server-side cursor *name*, not the cursor class.
+            # Passing the class there does not raise at call time --
+            # psycopg3 does not type-check ``name`` -- so the returned
+            # object is simply not a justorm cursor.  This assertion
+            # catches a regression if psycopg3 ever changes to treat a
+            # positional argument as the factory.
+            cur = conn.cursor(justorm.psycopg.Cursor)
+            try:
+                assert not isinstance(cur, justorm.psycopg.Cursor)
+            finally:
+                cur.close()
+
+            # The factory lives on the *connection*, not in the
+            # arguments to ``cursor()``.  ``Connection.cursor()`` has
+            # no ``cursor_factory`` parameter.
+            conn.cursor_factory = justorm.psycopg.Cursor
+            cur = conn.cursor()
             try:
                 assert isinstance(cur, justorm.psycopg.Cursor)
             finally:
